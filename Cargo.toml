@@ -1,43 +1,43 @@
 [package]
 name = "snarkos"
 version = "2.2.7"
-authors = [ "The Aleo Team <hello@aleo.org>" ]
+authors = ["The Aleo Team <hello@aleo.org>"]
 description = "A decentralized operating system"
 homepage = "https://aleo.org"
 repository = "https://github.com/AleoNet/snarkOS"
 keywords = [
-  "aleo",
-  "cryptography",
-  "blockchain",
-  "decentralized",
-  "zero-knowledge"
+    "aleo",
+    "cryptography",
+    "blockchain",
+    "decentralized",
+    "zero-knowledge"
 ]
-categories = [ "cryptography", "operating-systems" ]
+categories = ["cryptography", "operating-systems"]
 license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.76.0" # Attention - Change the MSRV in rust-toolchain and in .circleci/config.yml as well
 
 [workspace]
 members = [
-  "account",
-  "cli",
-  "display",
-  "node",
-  "node/bft",
-  "node/bft/events",
-  "node/bft/ledger-service",
-  "node/bft/storage-service",
-  "node/cdn",
-  "node/consensus",
-  "node/metrics",
-  "node/rest",
-  "node/router",
-  "node/router/messages",
-  "node/sync",
-  "node/sync/communication-service",
-  "node/sync/locators",
-  "node/tcp",
-  ".integration"
+    "account",
+    "cli",
+    "display",
+    "node",
+    "node/bft",
+    "node/bft/events",
+    "node/bft/ledger-service",
+    "node/bft/storage-service",
+    "node/cdn",
+    "node/consensus",
+    "node/metrics",
+    "node/rest",
+    "node/router",
+    "node/router/messages",
+    "node/sync",
+    "node/sync/communication-service",
+    "node/sync/locators",
+    "node/tcp",
+    ".integration"
 ]
 
 [workspace.dependencies.aleo-std]
@@ -45,26 +45,26 @@ version = "=0.1.24"
 default-features = false
 
 [workspace.dependencies.snarkvm]
-#path = "../snarkVM"
-git = "https://github.com/AleoNet/snarkVM.git"
-rev = "3d42aa0" # If this is updated, the rev in `node/rest/Cargo.toml` must be updated as well.
+path = "../snarkVM"     # 使用本地的版本
+#git = "https://github.com/AleoNet/snarkVM.git"
+#rev = "3d42aa0" # If this is updated, the rev in `node/rest/Cargo.toml` must be updated as well.
 #version = "=0.16.18"
-features = [ "circuit", "console", "rocks" ]
+features = ["circuit", "console", "rocks"]
 
 [[bin]]
 name = "snarkos"
 path = "snarkos/main.rs"
 
 [features]
-metrics = [ "snarkos-node-metrics", "snarkos-node/metrics" ]
-history = [ "snarkos-node/history" ]
+metrics = ["snarkos-node-metrics", "snarkos-node/metrics"]
+history = ["snarkos-node/history"]
 
 [dependencies.anyhow]
 version = "1.0.79"
 
 [dependencies.clap]
 version = "4.4"
-features = [ "derive" ]
+features = ["derive"]
 
 [dependencies.crossterm]
 version = "0.27.0"

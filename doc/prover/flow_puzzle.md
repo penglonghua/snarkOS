@@ -1,62 +1,21 @@
-// Copyright 2024 Aleo Network Foundation
-// This file is part of the snarkOS library.
+# 证明者的流程设计
 
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at:
+* 这个地方需要考虑一下 多个CPU.
+* 关键地方的设计
+* 关键地方的输入和输出
+* 这个地方的代码是怎么 从 OS 到 VM 中的.(这个地方也曾经画了一周的时间.)
+* 它又是怎么用 VM 中的返回值的代码的.
+* 把 整个输入输出 给串起来，就是非常好的 设计了, 代码不能太大，也不能太小.
 
-// http://www.apache.org/licenses/LICENSE-2.0
+* 先用文字描述清楚后，才可以画图等等来表示. 一步一步的流程 走起来即可.
 
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+***
 
-mod router;
+## 1.证明者本身的信息:
 
-use crate::traits::NodeInterface;
-use snarkos_account::Account;
-use snarkos_node_bft::ledger_service::ProverLedgerService;
-use snarkos_node_router::{
-    messages::{Message, NodeType, UnconfirmedSolution},
-    Heartbeat,
-    Inbound,
-    Outbound,
-    Router,
-    Routing,
-};
-use snarkos_node_sync::{BlockSync, BlockSyncMode};
-use snarkos_node_tcp::{
-    protocols::{Disconnect, Handshake, OnConnect, Reading, Writing},
-    P2P,
-};
-use snarkvm::{
-    ledger::narwhal::Data,
-    prelude::{
-        block::{Block, Header},
-        puzzle::{Puzzle, Solution},
-        store::ConsensusStorage,
-        Network,
-    },
-    synthesizer::VM,
-};
+这个地方 重点关注 puzzle
 
-use aleo_std::StorageMode;
-use anyhow::Result;
-use colored::Colorize;
-use core::{marker::PhantomData, time::Duration};
-use parking_lot::{Mutex, RwLock};
-use rand::{rngs::OsRng, CryptoRng, Rng};
-use snarkos_node_bft::helpers::fmt_id;
-use std::{
-    net::SocketAddr,
-    sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
-        Arc,
-    },
-};
-use tokio::task::JoinHandle;
+```rust
 
 /// A prover is a light node, capable of producing proofs for consensus.
 #[derive(Clone)]
@@ -74,17 +33,25 @@ pub struct Prover<N: Network, C: ConsensusStorage<N>> {
     /// The latest block header.
     latest_block_header: Arc<RwLock<Option<Header<N>>>>,
     /// The number of puzzle instances.
-    puzzle_instances: Arc<AtomicU8>, // [plh] 跟 puzzle 有关系的2，puzzle_instances 实例数量，注意多个 clone 体公用同一个 Arc.
+    puzzle_instances: Arc<AtomicU8>, // [plh] 跟 puzzle 有关系的2，puzzle_instances 实例数量
     /// The maximum number of puzzle instances.
-    max_puzzle_instances: u8, // [plh] 跟puzzle 有关系的3, max_puzzle_instances 允许的 puzzle 数量 . 这个地方不需要写成 Arc, 因为 初始化的时候就确定的,后面的操作都是 读.
+    max_puzzle_instances: u8, // [plh] 跟puzzle 有关系的3, max_puzzle_instances 允许的 puzzle 数量
     /// The spawned handles.
     handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
     /// The shutdown signal.
     shutdown: Arc<AtomicBool>,
     /// PhantomData.
     _phantom: PhantomData<C>,
+
 }
 
+```
+
+## 2 证明者的初始化
+
+接下来看看 初始化. 同样的关注是 puzzle 这个地方 也必须跟上面一致，也是3个.
+
+```rust
 impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
     /// Initializes a new prover node.
     pub async fn new(
@@ -115,9 +82,8 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
             allow_external_peers,
             matches!(storage_mode, StorageMode::Development(_)),
         )
-        .await?;
+            .await?;
         // Compute the maximum number of puzzle instances.
-        // Why 为什么这么低， 实际上跑的时候 cpu 占用率比较高， 因为其他的地方还会用到.
         let max_puzzle_instances = num_cpus::get().saturating_sub(2).clamp(1, 6); // 取值一般都是 6
 
         // Initialize the node.
@@ -125,7 +91,7 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
             router,
             sync: Arc::new(sync),
             genesis,
-            puzzle: VM::<N, C>::new_puzzle()?, // [plh] puzzle 初始化了， 因为后面需要调用 puzzle 中的方法 . 这个地方 才是第一次出现 VM的地方. 这个地方需要改的地方. 这个地方才是 puzzle 用武之地. 这个地方就涉及到了很多东西， 指令的采样.
+            puzzle: VM::<N, C>::new_puzzle()?, // [plh] puzzle 初始化了， 因为后面需要调用 puzzle 中的方法 . 这个地方 才是第一次出现 VM的地方. 这个地方需要改的地方. 这个地方才是 puzzle 用武之地.
             latest_epoch_hash: Default::default(),
             latest_block_header: Default::default(),
             puzzle_instances: Default::default(), // puzzle 数量的当前值, 默认为 0 ,一开始肯定是0, 这个地方也是 原子计数，后面可以仿造这个来进行计数.
@@ -137,7 +103,7 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
         // Initialize the routing.
         node.initialize_routing().await;
         // Initialize the puzzle.
-        node.initialize_puzzle().await; // [plh] 这个地方的原始注释是写错了，这个地方实际是调用 puzzle 中的方法了, 已经不是初始化了,不要给注释给误导了.
+        node.initialize_puzzle().await; // [plh] 这个地方的原始注释是写错了，这个地方实际是调用 puzzle 中的方法了, 已经不是初始化了.
 
         // Initialize the notification message loop.
         node.handles.lock().push(crate::start_notification_message_loop());
@@ -148,27 +114,15 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
     }
 }
 
-#[async_trait]
-impl<N: Network, C: ConsensusStorage<N>> NodeInterface<N> for Prover<N, C> {
-    /// Shuts down the node.
-    async fn shut_down(&self) {
-        info!("Shutting down...");
+```
 
-        // Shut down the puzzle.
-        debug!("Shutting down the puzzle...");
-        self.shutdown.store(true, Ordering::Relaxed);
+后面这个的地方 流程比较 细了.
 
-        // Abort the tasks.
-        debug!("Shutting down the prover...");
-        self.handles.lock().iter().for_each(|handle| handle.abort());
+前面已经 puzzle 初始化了， 看看如何执行的.
 
-        // Shut down the router.
-        self.router.shut_down().await;
+## 3.0 node.initialize_puzzle().await;
 
-        info!("Node has shut down.");
-    }
-}
-
+```rust
 impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
     /// Initialize a new instance of the puzzle.
     async fn initialize_puzzle(&self) {
@@ -177,11 +131,19 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
             // 允许的最大值 max_puzzle_instances  就开几个 tokio::spawn 异步
             let prover = self.clone();
             self.handles.lock().push(tokio::spawn(async move {
-                prover.puzzle_loop().await; // 这个地方是 死循环, 也不需要 结果.
+                prover.puzzle_loop().await; // 这个地方是 死循环
             }));
         }
     }
+}
 
+```
+
+## 3.1 prover.puzzle_loop()
+
+```rust
+
+impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
     /// Executes an instance of the puzzle.
     async fn puzzle_loop(&self) {
         // 从名字就知道 这个地方要一直计算才行, 是个死循环的. 因为一直要计算的.
@@ -201,7 +163,6 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
 
             // If the number of instances of the puzzle exceeds the maximum, then skip this iteration.
             // 添加 max_puzzle_instances 最大限制.
-            // 获取当前的数量关系 [plh] 这个地方 后面显卡的地方就会用上
             if self.num_puzzle_instances() > self.max_puzzle_instances {
                 // Sleep for a brief period of time.
                 tokio::time::sleep(Duration::from_millis(500)).await;
@@ -236,7 +197,7 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
                     prover.puzzle_iteration(epoch_hash, coinbase_target, proof_target, &mut OsRng)
                     // 传递了 随机值进去了,因为这个地方的 随机值也是构成 solution 的一部分，否则无法验证者无法校验
                 })
-                .await;
+                    .await;
 
                 // If the prover found a solution, then broadcast it.
                 if let Ok(Some((solution_target, solution))) = result {
@@ -256,7 +217,15 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
             }
         }
     }
+}
 
+```
+
+## 3.2 prover.puzzle_iteration 这个地方是为 puzzle_loop 做的对应封装，否则代码量太大了.
+
+```rust
+
+impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
     /// Performs one iteration of the puzzle.
     fn puzzle_iteration<R: Rng + CryptoRng>(
         &self,
@@ -270,10 +239,10 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
         self.increment_puzzle_instances();
 
         debug!(
-            "Proving 'Puzzle' for Epoch '{}' {}",
-            fmt_id(epoch_hash),
-            format!("(Coinbase Target {coinbase_target}, Proof Target {proof_target})").dimmed()
-        );
+                "Proving 'Puzzle' for Epoch '{}' {}",
+                fmt_id(epoch_hash),
+                format!("(Coinbase Target {coinbase_target}, Proof Target {proof_target})").dimmed()
+            );
 
         // Compute the solution.
         // 这个地方 其实也是 之前 OS 到 VM 中的 puzzle.prove
@@ -289,8 +258,20 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
         // Return the result.
         result
     }
+}
 
+```
+
+## 3.3  broadcast_solution
+
+广播的 就是 Solution 可以这么说.
+
+```rust
+
+
+impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
     /// Broadcasts the solution to the network.
+
     fn broadcast_solution(&self, solution: Solution<N>) {
         // Prepare the unconfirmed solution message.
         let message = Message::UnconfirmedSolution(UnconfirmedSolution {
@@ -300,23 +281,28 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
         // Propagate the "UnconfirmedSolution".
         self.propagate(message, &[]);
     }
-
-    /// Returns the current number of puzzle instances.
-    fn num_puzzle_instances(&self) -> u8 {
-        self.puzzle_instances.load(Ordering::Relaxed)
-    }
-
-    /// Increments the number of puzzle instances.
-    fn increment_puzzle_instances(&self) {
-        self.puzzle_instances.fetch_add(1, Ordering::Relaxed);
-        #[cfg(debug_assertions)]
-        trace!("Number of Instances - {}", self.num_puzzle_instances());
-    }
-
-    /// Decrements the number of puzzle instances.
-    fn decrement_puzzle_instances(&self) {
-        self.puzzle_instances.fetch_sub(1, Ordering::Relaxed);
-        #[cfg(debug_assertions)]
-        trace!("Number of Instances - {}", self.num_puzzle_instances());
-    }
 }
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
